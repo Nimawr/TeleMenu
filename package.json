@@ -28,6 +28,14 @@
   ],
   "author": "",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Nimawr/TeleMenu.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Nimawr/TeleMenu/issues"
+  },
+  "homepage": "https://github.com/Nimawr/TeleMenu#readme",
   "engines": {
     "node": ">=18"
   },
