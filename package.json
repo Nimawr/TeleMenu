@@ -1,0 +1,45 @@
+{
+  "name": "telemenu",
+  "version": "1.0.0",
+  "description": "Lightweight helper to build dynamic Telegram inline keyboard menus (Telegraf-compatible).",
+  "type": "module",
+  "main": "src/index.js",
+  "module": "src/index.js",
+  "exports": {
+    ".": {
+      "import": "./src/index.js",
+      "types": "./types/index.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "types/index.d.ts",
+  "files": [
+    "src",
+    "types"
+  ],
+  "sideEffects": false,
+  "keywords": [
+    "telegram",
+    "telegraf",
+    "bot",
+    "inline-keyboard",
+    "menu",
+    "keyboard"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Nimawr/TeleMenu.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Nimawr/TeleMenu/issues"
+  },
+  "homepage": "https://github.com/Nimawr/TeleMenu#readme",
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
