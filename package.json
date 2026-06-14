@@ -1,6 +1,6 @@
 {
   "name": "telemenu",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Lightweight helper to build dynamic Telegram inline keyboard menus (Telegraf-compatible).",
   "type": "module",
   "main": "src/index.js",
@@ -15,7 +15,8 @@
   "types": "types/index.d.ts",
   "files": [
     "src",
-    "types"
+    "types",
+    "LICENSE"
   ],
   "sideEffects": false,
   "keywords": [
@@ -41,5 +42,13 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "peerDependencies": {
+    "telegraf": ">=4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "telegraf": {
+      "optional": true
+    }
   }
 }

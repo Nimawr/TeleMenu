@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import Rule from './rule.js';
 
 /**
  * @typedef {Object} Requirement
@@ -9,11 +10,23 @@ import crypto from 'crypto';
  */
 
 /**
+ * @typedef {'danger'|'success'|'primary'} ButtonStyle
+ */
+
+/**
+ * @typedef {Object} ButtonAppearance
+ * @property {string} [iconCustomEmojiId] Custom emoji identifier shown on the button
+ * @property {ButtonStyle} [style] Telegram button style
+ */
+
+/**
  * @typedef {Object} ButtonOptions
- * @property {'action'|'url'|'webApp'|'placeholder'} type Button type
+ * @property {'action'|'url'|'webApp'|'copy'|'placeholder'} type Button type
  * @property {string|null} [url] URL for URL/WebApp buttons
+ * @property {string|null} [copyText] Text copied by copy buttons
+ * @property {ButtonAppearance} [appearance] Visual button options
  * @property {(ctx:any, menuApi:any)=>any|Promise<any>|null} [middleware] Button handler
- * @property {Requirement} [requirement] Requirement configuration
+ * @property {Requirement|Rule} [requirement] Requirement or rule configuration
  */
 
 class Button {
@@ -22,14 +35,17 @@ class Button {
     #isHidden;
     #_label;
     #_labelFunction;
+    #_resolvedAppearance;
+    #_resolvedRuleState;
+    #_failLabel;
 
     /**
      * Button constructor
      * @param {string|((ctx:any)=>string)} label Button text or a function that returns the text
      * @param {ButtonOptions} options Button options
      */
-    constructor(label, { type, url = null, middleware = null, requirement = {} }) {
-        if (!type) throw new Error('Button type is required.');
+    constructor(label, { type, url = null, copyText = null, appearance = {}, middleware = null, requirement = {} }) {
+        if (!type) throw new Error('Button type is required. Valid types: "action", "url", "webApp", "copy", "placeholder".');
 
         if (typeof label === 'function') {
             this.#_labelFunction = label;
@@ -41,27 +57,31 @@ class Button {
         
         this.type = type;
         this.url = url;
+        this.copyText = copyText;
         this.middleware = middleware;
-        this.requirement = {
-            require: requirement.require || (() => true),
-            disable: !!requirement.disable || false,
-            doWhenDisable: requirement.doWhenDisable || (() => { }),
-            hidden: !!requirement.hidden || false,
+        this.baseAppearance = {
+            iconCustomEmojiId: appearance.iconCustomEmojiId || null,
+            style: appearance.style || null,
         };
+        this.rule = Rule.isRuleLike(requirement) ? requirement : new Rule();
         this.#isDisable = false;
         this.#isHidden = false;
+        this.#_resolvedAppearance = this.baseAppearance;
+        this.#_resolvedRuleState = null;
+        this.#_failLabel = null;
 
-        this.callbackData = type === 'action' ? this.#generateCallbackData(type) : null;
+        this.callbackData = type === 'placeholder' ? null : this.#generateCallbackData(type);
     }
 
     /**
      * Get the button label from static text or label function
      * @param {any} ctx Context (e.g., Telegraf ctx)
+     * @param {any} [payload] Optional payload
      * @returns {string}
      * @private
      */
-    #getLabel(ctx) {
-        return this.#_labelFunction ? this.#_labelFunction(ctx) : this.#_label;
+    #getLabel(ctx, payload) {
+        return this.#_labelFunction ? this.#_labelFunction(ctx, payload) : this.#_label;
     }
 
     /**
@@ -82,11 +102,13 @@ class Button {
             this.#isHidden = true;
             return false;
         }
-        
-        const check = await this.requirement.require(ctx);
-        this.#isDisable = !check && this.requirement.disable;
-        this.#isHidden = !check && this.requirement.hidden;
-        return check;
+
+        this.#_resolvedRuleState = await this.rule.resolve(ctx, this.baseAppearance);
+        this.#isDisable = this.#_resolvedRuleState.disabled;
+        this.#isHidden = this.#_resolvedRuleState.hidden;
+        this.#_resolvedAppearance = this.#_resolvedRuleState.appearance;
+        this.#_failLabel = this.#_resolvedRuleState.failLabel;
+        return this.#_resolvedRuleState.passed;
     }
 
     /**
@@ -99,50 +121,98 @@ class Button {
         const checkRequirement = await this.evaluateRequirement(ctx);
         if (checkRequirement && this.middleware) {
             try {
-                return await this.middleware(ctx, menuApi);
+                const result = await this.middleware(ctx, menuApi);
+                if (this.#_resolvedRuleState?.onTrue) {
+                    await this.#_resolvedRuleState.onTrue(ctx, menuApi);
+                }
+                return result;
             } catch (error) {
                 console.error('Error in middleware:', error);
             }
-        } else if (this.#isDisable) {
+        } else if (checkRequirement) {
             try {
-                return await this.requirement.doWhenDisable(ctx, menuApi);
+                if (this.#_resolvedRuleState?.onTrue) {
+                    return await this.#_resolvedRuleState.onTrue(ctx, menuApi);
+                }
             } catch (error) {
-                console.error('Error in doWhenDisable middleware:', error);
+                console.error('Error in doWhenTrue middleware:', error);
+            }
+        } else if (this.#isDisable || this.#_resolvedRuleState?.onFalse) {
+            try {
+                if (this.#_resolvedRuleState?.onFalse) {
+                    return await this.#_resolvedRuleState.onFalse(ctx, menuApi);
+                }
+            } catch (error) {
+                console.error('Error in doWhenFalse middleware:', error);
             }
         }
     }
 
     /**
-     * Generate a unique callback_data string
-     * @param {'action'|'url'|'webApp'|'placeholder'} type
+     * Generate a deterministic callback_data string from type and label.
+     * Stable across renders so Telegram can match button clicks.
+     * @param {'action'|'url'|'webApp'|'copy'|'placeholder'} type
      * @returns {string}
      * @private
      */
     #generateCallbackData(type) {
-        const uniqueString = `${type}_${Date.now()}_${Math.random()}`;
+        const labelSource = this.#_labelFunction ? this.#_labelFunction.toString() : this.#_label;
+        const handlerSource = this.middleware ? this.middleware.toString() : '';
+        const uniqueString = `${type}_${labelSource}_${handlerSource}`;
         return crypto.createHash('sha256').update(uniqueString).digest('hex').slice(0, 16);
     }
 
     /**
      * Return Telegram Inline Keyboard button JSON or null
      * @param {any} ctx
-     * @returns {{text:string, url?:string, callback_data?:string}|null}
+     * @param {any} [payload]
+     * @returns {{text:string, url?:string, web_app?:{url:string}, copy_text?:{text:string}, icon_custom_emoji_id?:string, style?:ButtonStyle, callback_data?:string}|null}
      */
-    toJSON(ctx) {
+    toJSON(ctx, payload) {
         if (this.#isHidden) return null;
         
         if (this.type === 'placeholder') return null;
 
-        if (this.#isDisable)
-            return {
-                text: `${this.#getLabel(ctx)} 🔒`,
-                callback_data: this.callbackData || this.#generateCallbackData('action'),
-            };
+        if (this.#isDisable) {
+            const failText = this.#_failLabel || this.#getLabel(ctx, payload);
+            return this.#withVisualOptions({
+                text: failText,
+                callback_data: this.callbackData,
+            });
+        }
 
+        if (this.type === 'webApp') {
+            return this.#withVisualOptions({
+                text: this.#getLabel(ctx, payload),
+                web_app: { url: this.url },
+            });
+        }
+
+        if (this.type === 'copy') {
+            return this.#withVisualOptions({
+                text: this.#getLabel(ctx, payload),
+                copy_text: { text: this.copyText },
+            });
+        }
+
+        return this.#withVisualOptions({
+            text: this.#getLabel(ctx, payload),
+            ...(this.type === 'url' && this.url ? { url: this.url } : {}),
+            ...(this.type === 'action' && this.callbackData ? { callback_data: this.callbackData } : {}),
+        });
+    }
+
+    /**
+     * Attach visual options supported by Telegram buttons.
+     * @param {Record<string, any>} button
+     * @returns {Record<string, any>}
+     * @private
+     */
+    #withVisualOptions(button) {
         return {
-            text: this.#getLabel(ctx),
-            ...(this.url ? { url: this.url } : {}),
-            ...(this.callbackData ? { callback_data: this.callbackData } : {}),
+            ...button,
+            ...(this.#_resolvedAppearance?.iconCustomEmojiId ? { icon_custom_emoji_id: this.#_resolvedAppearance.iconCustomEmojiId } : {}),
+            ...(this.#_resolvedAppearance?.style ? { style: this.#_resolvedAppearance.style } : {}),
         };
     }
 }

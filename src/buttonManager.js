@@ -56,14 +56,15 @@ class ButtonManager {
     /**
      * Generate Telegram-compatible markup JSON
      * @param {any} ctx
+     * @param {any} [payload]
      * @returns {{inline_keyboard: Array<Array<{text:string, url?:string, callback_data?:string}>>}}
      */
-    toJSON(ctx) {
+    toJSON(ctx, payload) {
         const inlineKeyboard = [];
         for (const row of this.buttons) {
             const rowData = [];
             for (const button of row) {
-                const json = button.toJSON(ctx);
+                const json = button.toJSON(ctx, payload);
                 if (json) rowData.push(json);
             }
             if (rowData.length > 0) inlineKeyboard.push(rowData);
